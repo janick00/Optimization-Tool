@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
+
+# Local course material; keep source PDFs and downloaded exercises out of GitHub.
+MSE_Unterlagen/
+
