@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -21,15 +20,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from topics.linear_programming.solver import (
-    DisplayNotation,
-    ObjectiveSense,
-    ProblemForm,
-    build_linear_program,
+from topics.linear_programming.form_conversion import (
     convert_problem,
+    form_defaults,
+)
+from topics.linear_programming.formatting import (
+    DisplayNotation,
     format_conversion_steps_html,
     format_linear_program_html,
 )
+from topics.linear_programming.models import ConversionResult, ObjectiveSense, ProblemForm
+from topics.linear_programming.problem_input import build_linear_program
 
 
 class ProblemFormulationPage(QWidget):
@@ -99,10 +100,10 @@ class ProblemFormulationPage(QWidget):
         content_layout.addWidget(self._create_output_group(), stretch=1)
         outer_layout.addLayout(content_layout, stretch=1)
 
-        self._source_form_combo.currentIndexChanged.connect(self._handle_source_form_change)
+        self._source_form_combo.currentIndexChanged.connect(self._handle_form_change)
         self._target_form_combo.currentIndexChanged.connect(self._convert)
         self._notation_combo.currentIndexChanged.connect(self._convert)
-        self._objective_sense_combo.currentIndexChanged.connect(self._handle_sense_change)
+        self._objective_sense_combo.currentIndexChanged.connect(self._handle_form_change)
         self._variable_count_combo.currentIndexChanged.connect(self._handle_count_change)
         self._constraint_count_combo.currentIndexChanged.connect(self._handle_count_change)
 
@@ -117,6 +118,11 @@ class ProblemFormulationPage(QWidget):
         group = QGroupBox("Problem input")
         layout = QVBoxLayout(group)
         layout.setSpacing(12)
+        self._editor_fields = QWidget()
+        fields = QVBoxLayout(self._editor_fields)
+        fields.setContentsMargins(0, 0, 0, 0)
+        fields.setSpacing(12)
+        layout.addWidget(self._editor_fields)
 
         settings_layout = QGridLayout()
         settings_layout.setHorizontalSpacing(10)
@@ -136,42 +142,43 @@ class ProblemFormulationPage(QWidget):
         self._constraint_count_combo = self._create_count_combo()
         settings_layout.addWidget(self._constraint_count_combo, 2, 1)
         settings_layout.setColumnStretch(1, 1)
-        layout.addLayout(settings_layout)
+        fields.addLayout(settings_layout)
 
         objective_label = QLabel("Objective coefficients (enter numbers before the variables)")
         objective_label.setObjectName("sectionLabel")
         objective_label.setWordWrap(True)
-        layout.addWidget(objective_label)
+        fields.addWidget(objective_label)
         self._objective_row_layout = QHBoxLayout()
         self._objective_row_layout.setSpacing(4)
-        layout.addLayout(self._objective_row_layout)
+        fields.addLayout(self._objective_row_layout)
 
         constraints_label = QLabel(
             "Constraints (enter coefficients; choose the relation and enter b)"
         )
         constraints_label.setObjectName("sectionLabel")
         constraints_label.setWordWrap(True)
-        layout.addWidget(constraints_label)
+        fields.addWidget(constraints_label)
         self._constraints_layout = QVBoxLayout()
         self._constraints_layout.setSpacing(6)
-        layout.addLayout(self._constraints_layout)
+        fields.addLayout(self._constraints_layout)
 
         domains_label = QLabel("Variable domains")
         domains_label.setObjectName("sectionLabel")
-        layout.addWidget(domains_label)
+        fields.addWidget(domains_label)
         self._domains_layout = QHBoxLayout()
         self._domains_layout.setSpacing(10)
-        layout.addLayout(self._domains_layout)
+        fields.addLayout(self._domains_layout)
+        self._add_input_sections(layout)
 
-        helper_label = QLabel(
+        self._variable_hint = QLabel(
             "The variable names x1, x2, ... and constraint labels are generated "
             "from the selected counts."
         )
-        helper_label.setObjectName("fieldHelp")
-        helper_label.setWordWrap(True)
-        layout.addWidget(helper_label)
+        self._variable_hint.setObjectName("fieldHelp")
+        self._variable_hint.setWordWrap(True)
+        layout.addWidget(self._variable_hint)
 
-        button_layout = QHBoxLayout()
+        self._input_button_layout = button_layout = QHBoxLayout()
         self._convert_button = QPushButton("Convert")
         self._convert_button.setObjectName("primaryButton")
         self._convert_button.clicked.connect(self._convert)
@@ -180,6 +187,9 @@ class ProblemFormulationPage(QWidget):
         layout.addLayout(button_layout)
         layout.addStretch()
         return group
+
+    def _add_input_sections(self, layout: QVBoxLayout) -> None:
+        """Optional sections after the shared LP input fields."""
 
     @staticmethod
     def _create_count_combo() -> QComboBox:
@@ -226,6 +236,11 @@ class ProblemFormulationPage(QWidget):
         editor.setFont(font)
 
     def _load_initial_example(self) -> None:
+        self._load_default_inputs()
+        self._source_form_combo.setCurrentIndex(self._form_index(ProblemForm.GENERAL))
+        self._target_form_combo.setCurrentIndex(self._form_index(ProblemForm.STANDARD))
+
+    def _load_default_inputs(self) -> None:
         self._objective_sense_combo.setCurrentIndex(0)
         variable_signals_blocked = self._variable_count_combo.blockSignals(True)
         constraint_signals_blocked = self._constraint_count_combo.blockSignals(True)
@@ -233,8 +248,6 @@ class ProblemFormulationPage(QWidget):
         self._constraint_count_combo.setCurrentIndex(self._count_index(2))
         self._variable_count_combo.blockSignals(variable_signals_blocked)
         self._constraint_count_combo.blockSignals(constraint_signals_blocked)
-        self._source_form_combo.setCurrentIndex(self._form_index(ProblemForm.GENERAL))
-        self._target_form_combo.setCurrentIndex(self._form_index(ProblemForm.STANDARD))
         self._general_relation_values = ["<=", "<="]
         self._general_domain_values = [">=0", ">=0"]
 
@@ -252,11 +265,7 @@ class ProblemFormulationPage(QWidget):
         self._update_form_fields()
         self._convert()
 
-    def _handle_source_form_change(self) -> None:
-        self._update_form_fields()
-        self._convert()
-
-    def _handle_sense_change(self) -> None:
+    def _handle_form_change(self) -> None:
         self._update_form_fields()
         self._convert()
 
@@ -266,8 +275,8 @@ class ProblemFormulationPage(QWidget):
             [edit.text() for edit in row] for row in self._constraint_coefficient_edits
         ]
         old_right_hand_sides = [edit.text() for edit in self._right_hand_side_edits]
-        old_relations = [combo.currentData() for combo in self._relation_combos]
-        old_domains = [combo.currentData() for combo in self._domain_combos]
+        old_relations = [str(combo.currentData()) for combo in self._relation_combos]
+        old_domains = [str(combo.currentData()) for combo in self._domain_combos]
 
         self._clear_layout(self._objective_row_layout)
         self._clear_layout(self._constraints_layout)
@@ -280,7 +289,13 @@ class ProblemFormulationPage(QWidget):
 
         variable_count = int(self._variable_count_combo.currentData())
         constraint_count = int(self._constraint_count_combo.currentData())
+        self._build_objective_fields(variable_count, old_objective)
+        self._build_constraint_fields(
+            variable_count, constraint_count, old_coefficients, old_right_hand_sides, old_relations
+        )
+        self._build_domain_fields(variable_count, old_domains)
 
+    def _build_objective_fields(self, variable_count: int, old_objective: list[str]) -> None:
         for variable_index in range(variable_count):
             if variable_index:
                 self._objective_row_layout.addWidget(QLabel("+"))
@@ -294,26 +309,35 @@ class ProblemFormulationPage(QWidget):
             self._objective_row_layout.addWidget(QLabel(f"x{variable_index + 1}"))
         self._objective_row_layout.addStretch()
 
+    def _build_constraint_fields(
+        self,
+        variable_count: int,
+        constraint_count: int,
+        old_coefficients: list[list[str]],
+        old_right_hand_sides: list[str],
+        old_relations: list[str],
+    ) -> None:
         for constraint_index in range(constraint_count):
             row_layout = QHBoxLayout()
             row_layout.setSpacing(4)
             row_layout.addWidget(QLabel(f"C{constraint_index + 1}:"))
             coefficient_edits: list[QLineEdit] = []
+            old_row = (
+                old_coefficients[constraint_index]
+                if constraint_index < len(old_coefficients)
+                else []
+            )
             for variable_index in range(variable_count):
                 if variable_index:
                     row_layout.addWidget(QLabel("+"))
-                old_row = (
-                    old_coefficients[constraint_index]
-                    if constraint_index < len(old_coefficients)
-                    else []
-                )
-                default_row = ("1" if constraint_index == 0 else "2") if variable_index == 0 else (
-                    "2" if constraint_index == 0 and variable_index == 1 else "1"
-                )
+                if constraint_index == 0:
+                    default_coefficient = "2" if variable_index == 1 else "1"
+                else:
+                    default_coefficient = "2" if variable_index == 0 else "1"
                 coefficient_edit = self._create_number_edit(
                     old_row[variable_index]
                     if variable_index < len(old_row)
-                    else default_row
+                    else default_coefficient
                 )
                 coefficient_edits.append(coefficient_edit)
                 row_layout.addWidget(coefficient_edit)
@@ -341,6 +365,7 @@ class ProblemFormulationPage(QWidget):
             self._constraint_coefficient_edits.append(coefficient_edits)
             self._constraints_layout.addLayout(row_layout)
 
+    def _build_domain_fields(self, variable_count: int, old_domains: list[str]) -> None:
         for variable_index in range(variable_count):
             domain_combo = self._create_domain_combo(
                 old_domains[variable_index]
@@ -389,7 +414,8 @@ class ProblemFormulationPage(QWidget):
             return
         index = combo.findData(value)
         if index >= 0:
-            combo.setCurrentIndex(index)
+            with QSignalBlocker(combo):
+                combo.setCurrentIndex(index)
 
     @staticmethod
     def _clear_layout(layout: QHBoxLayout | QVBoxLayout) -> None:
@@ -398,6 +424,7 @@ class ProblemFormulationPage(QWidget):
             widget = item.widget()
             child_layout = item.layout()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
             elif child_layout is not None:
                 ProblemFormulationPage._clear_layout(child_layout)  # type: ignore[arg-type]
@@ -416,39 +443,25 @@ class ProblemFormulationPage(QWidget):
 
     def _update_form_fields(self) -> None:
         source_form = ProblemForm(self._source_form_combo.currentData())
-        is_general = source_form is ProblemForm.GENERAL
-        was_general = bool(self._relation_combos) and self._relation_combos[0].isEnabled()
-        if not is_general and was_general:
-            self._store_general_selections()
-
         sense = ObjectiveSense(self._objective_sense_combo.currentData())
-        automatic_relation = "=" if source_form is ProblemForm.STANDARD else (
-            "<=" if sense is ObjectiveSense.MAXIMIZE else ">="
+        defaults = form_defaults(source_form, sense)
+        relation = defaults[0].value if defaults is not None else None
+        domain = defaults[1].value if defaults is not None else None
+        self._update_form_combos(
+            self._relation_combos, self._general_relation_values, relation
         )
-        automatic_domain = "free" if source_form is ProblemForm.INEQUALITY else ">=0"
+        self._update_form_combos(
+            self._domain_combos, self._general_domain_values, domain
+        )
 
-        for index, combo in enumerate(self._relation_combos):
-            combo.setEnabled(is_general)
-            if is_general:
-                value = (
-                    self._general_relation_values[index]
-                    if index < len(self._general_relation_values)
-                    else str(combo.currentData())
-                )
-            else:
-                value = automatic_relation
-            self._set_combo_value(combo, value)
-
-        for index, combo in enumerate(self._domain_combos):
-            combo.setEnabled(is_general)
-            if is_general:
-                value = (
-                    self._general_domain_values[index]
-                    if index < len(self._general_domain_values)
-                    else str(combo.currentData())
-                )
-            else:
-                value = automatic_domain
+    def _update_form_combos(
+        self, combos: list[QComboBox], general_values: list[str], fixed_value: str | None
+    ) -> None:
+        for index, combo in enumerate(combos):
+            combo.setEnabled(fixed_value is None)
+            value = fixed_value
+            if value is None and index < len(general_values):
+                value = general_values[index]
             self._set_combo_value(combo, value)
 
     def _build_input_text(self) -> tuple[str, str, str, str, str]:
@@ -488,10 +501,13 @@ class ProblemFormulationPage(QWidget):
             self._refresh_style(self._status_label)
             return
 
-        self._status_label.setText(f"Converted successfully to {target_form.label}.")
+        self._show_conversion(result, notation)
+
+    def _show_conversion(self, result: ConversionResult, notation: DisplayNotation) -> None:
+        self._status_label.setText(f"Converted successfully to {result.target_form.label}.")
         self._status_label.setProperty("state", "success")
         self._output_edit.setHtml(
-            format_linear_program_html(result.problem, target_form, notation)
+            format_linear_program_html(result.problem, result.target_form, notation)
         )
         self._steps_edit.setHtml(format_conversion_steps_html(result))
         self._refresh_style(self._status_label)
@@ -500,7 +516,3 @@ class ProblemFormulationPage(QWidget):
     def _refresh_style(widget: QWidget) -> None:
         widget.style().unpolish(widget)
         widget.style().polish(widget)
-
-
-# Backwards-compatible name for code that imported the phase-one placeholder.
-LinearProgrammingPage = ProblemFormulationPage

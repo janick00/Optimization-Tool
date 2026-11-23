@@ -17,6 +17,26 @@ QFrame#navigationPanel {
     border-right: 1px solid #2b3952;
 }
 
+QWidget#navigationContent {
+    background-color: transparent;
+}
+
+QPushButton#navigationToggle {
+    color: #e6edf3;
+    background-color: #22304a;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    font-size: 20px;
+}
+
+QPushButton#navigationToggle:hover {
+    background-color: #2b3b56;
+}
+
+QPushButton#navigationToggle:focus {
+    border-color: #60a5fa;
+}
+
 QLabel#applicationTitle {
     color: #f8fafc;
     font-size: 20px;
@@ -73,7 +93,7 @@ QLineEdit, QPlainTextEdit, QTextBrowser, QComboBox {
     selection-background-color: #2563eb;
 }
 
-QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
+QLineEdit:focus, QComboBox:focus {
     border-color: #38bdf8;
 }
 
@@ -131,25 +151,6 @@ QTextBrowser#resultEditor, QTextBrowser#stepsEditor {
     border: 1px solid #334155;
     border-radius: 5px;
     padding: 10px;
-}
-
-QTableWidget {
-    color: #e6edf3;
-    background-color: #0f172a;
-    alternate-background-color: #141f33;
-    border: 1px solid #334155;
-    gridline-color: #2b3952;
-    selection-background-color: #1d4ed8;
-}
-
-QHeaderView::section {
-    color: #cbd5e1;
-    background-color: #1e293b;
-    border: none;
-    border-right: 1px solid #334155;
-    border-bottom: 1px solid #334155;
-    padding: 5px;
-    font-weight: 600;
 }
 
 QTextBrowser#optimizationDetails {

@@ -1,2 +1,1 @@
-"""Simplex method topic."""
-
+"""Simplex in decision-variable coordinates."""

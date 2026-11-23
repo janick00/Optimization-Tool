@@ -1,2 +1,0 @@
-"""Newton's method topic."""
-

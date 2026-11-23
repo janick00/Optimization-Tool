@@ -3,20 +3,18 @@
 import unittest
 from fractions import Fraction
 
-from topics.linear_programming.solver import (
+from topics.linear_programming.form_conversion import convert_problem
+from topics.linear_programming.formatting import DisplayNotation, format_linear_program_html
+from topics.linear_programming.models import (
     ConstraintRelation,
-    DisplayNotation,
     ObjectiveSense,
     ProblemForm,
     VariableDomain,
-    build_linear_program,
-    convert_problem,
-    format_linear_program,
-    format_linear_program_html,
 )
+from topics.linear_programming.problem_input import build_linear_program
 
 
-class LinearProgrammingSolverTests(unittest.TestCase):
+class FormConversionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.problem = build_linear_program(
             source_form=ProblemForm.GENERAL,
@@ -74,18 +72,6 @@ class LinearProgrammingSolverTests(unittest.TestCase):
                 self.assertEqual(result.target_form, target_form)
                 self.assertGreater(len(result.problem.objective), 0)
 
-    def test_all_display_notations_are_available(self) -> None:
-        converted = convert_problem(self.problem, ProblemForm.STANDARD).problem
-        for notation in DisplayNotation:
-            with self.subTest(notation=notation):
-                output = format_linear_program(converted, ProblemForm.STANDARD, notation)
-                expected_label = (
-                    "Standard Form"
-                    if notation is DisplayNotation.EXPANDED
-                    else notation.label
-                )
-                self.assertIn(expected_label, output)
-
     def test_html_renderer_supports_all_display_notations(self) -> None:
         for notation in DisplayNotation:
             with self.subTest(notation=notation):
@@ -96,3 +82,5 @@ class LinearProgrammingSolverTests(unittest.TestCase):
                 )
                 self.assertIn("<html>", html_output)
                 self.assertIn("Subject to", html_output)
+                label = ProblemForm.GENERAL.label if notation is DisplayNotation.EXPANDED else notation.label
+                self.assertIn(label, html_output)

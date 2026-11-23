@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -16,6 +16,10 @@ from PySide6.QtWidgets import (
 )
 
 from gui.topic_registry import TOPIC_REGISTRY, TopicDefinition
+
+
+NAVIGATION_WIDTH = 250
+COLLAPSED_NAVIGATION_WIDTH = 58
 
 
 class MainWindow(QMainWindow):
@@ -39,32 +43,43 @@ class MainWindow(QMainWindow):
 
         return self._current_topic_id
 
-    @property
-    def topic_button_ids(self) -> tuple[str, ...]:
-        """Return topic identifiers in their navigation order."""
-
-        return tuple(self._buttons_by_topic_id)
-
     def _build_ui(self) -> None:
         central_widget = QWidget()
         central_layout = QHBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
 
-        navigation_panel = self._create_navigation_panel()
+        self._navigation_panel = self._create_navigation_panel()
         content_panel = self._create_content_panel()
 
-        central_layout.addWidget(navigation_panel)
+        central_layout.addWidget(self._navigation_panel)
         central_layout.addWidget(content_panel, stretch=1)
         self.setCentralWidget(central_widget)
 
     def _create_navigation_panel(self) -> QFrame:
         navigation_panel = QFrame()
         navigation_panel.setObjectName("navigationPanel")
-        navigation_panel.setFixedWidth(250)
+        navigation_panel.setFixedWidth(NAVIGATION_WIDTH)
 
         layout = QVBoxLayout(navigation_panel)
-        layout.setContentsMargins(18, 28, 18, 24)
+        layout.setContentsMargins(12, 18, 12, 18)
+        self._navigation_toggle = QPushButton("☰")
+        self._navigation_toggle.setObjectName("navigationToggle")
+        self._navigation_toggle.setFixedSize(34, 34)
+        self._navigation_toggle.setAutoDefault(False)
+        self._navigation_toggle.setCheckable(True)
+        self._navigation_toggle.setChecked(True)
+        self._navigation_toggle.setToolTip("Hide navigation")
+        self._navigation_toggle.setAccessibleName("Hide navigation")
+        self._navigation_toggle.toggled.connect(self._set_navigation_expanded)
+        layout.addWidget(self._navigation_toggle, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        self._navigation_content = QWidget()
+        self._navigation_content.setObjectName("navigationContent")
+        layout.addWidget(self._navigation_content, stretch=1)
+        layout.addStretch()
+        layout = QVBoxLayout(self._navigation_content)
+        layout.setContentsMargins(6, 2, 6, 6)
         layout.setSpacing(8)
 
         title_label = QLabel("Optimization Solver")
@@ -90,8 +105,15 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return navigation_panel
 
+    def _set_navigation_expanded(self, expanded: bool) -> None:
+        self._navigation_content.setVisible(expanded)
+        self._navigation_panel.setFixedWidth(NAVIGATION_WIDTH if expanded else COLLAPSED_NAVIGATION_WIDTH)
+        label = "Hide navigation" if expanded else "Show navigation"
+        self._navigation_toggle.setToolTip(label)
+        self._navigation_toggle.setAccessibleName(label)
+
     def _create_navigation_button(self, topic: TopicDefinition) -> QPushButton:
-        button = QPushButton(topic.label)
+        button = QPushButton(topic.label.replace("&", "&&"))
         button.setObjectName("navigationButton")
         button.setCheckable(True)
         button.setAutoDefault(False)

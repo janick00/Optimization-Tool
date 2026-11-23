@@ -7,10 +7,11 @@ from dataclasses import dataclass
 
 from PySide6.QtWidgets import QWidget
 
-from topics.gradient_descent.page import GradientDescentPage
+from topics.integer_programming.page import IntegerProgrammingPage
 from topics.linear_programming.page import ProblemFormulationPage
-from topics.newton_method.page import NewtonMethodPage
+from topics.network_optimization.page import NetworkOptimizationPage
 from topics.simplex_method.page import SimplexMethodPage
+from topics.unconstrained_optimization.aitken_page import AitkenPage
 from topics.unconstrained_optimization.page import UnconstrainedOptimizationPage
 
 
@@ -45,14 +46,19 @@ TOPIC_REGISTRY: tuple[TopicDefinition, ...] = (
         page_factory=SimplexMethodPage,
     ),
     TopicDefinition(
-        identifier="gradient_descent",
-        label="Gradient Descent",
-        page_factory=GradientDescentPage,
+        identifier="integer_programming",
+        label="Integer Linear Programming",
+        page_factory=IntegerProgrammingPage,
     ),
     TopicDefinition(
-        identifier="newton_method",
-        label="Newton's Method",
-        page_factory=NewtonMethodPage,
+        identifier="aitken",
+        label="Aitken Acceleration",
+        page_factory=AitkenPage,
+    ),
+    TopicDefinition(
+        identifier="network_optimization",
+        label="Graphen & Netzwerke",
+        page_factory=NetworkOptimizationPage,
     ),
 )
 

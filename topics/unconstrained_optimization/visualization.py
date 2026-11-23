@@ -1,120 +1,203 @@
-"""Matplotlib visualizations for unconstrained optimization runs."""
+"""Shared trajectory plot and Matplotlib styling for the iteration views."""
 
 from __future__ import annotations
 
+from math import isfinite
+
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from topics.unconstrained_optimization.solver import OptimizationResult, ParsedFunction
+from topics.unconstrained_optimization.history import IterationFrame, iteration_history
+from topics.unconstrained_optimization.models import OptimizationMethod, OptimizationResult
+
+
+BACKGROUND = "#111827"
+AXES = "#0f172a"
+PATH = "#fbbf24"
+CURRENT = "#f8fafc"
+NEXT = "#34d399"
+DIRECTION = "#93c5fd"
+TRIAL = "#fb923c"
+CONVERGENCE = "#d8b4fe"
+PLOT_LIMIT = 1e145
+
+Limits = tuple[tuple[float, float], tuple[float, float]]
+
+
+def subplot_bottom(figure: Figure) -> float:
+    """Keep space for the tick labels and axis title when the canvas shrinks."""
+
+    label_space = 43 * figure.dpi / 100
+    return max(.24, min(.48, label_space / max(figure.bbox.height, 1.)))
+
+
+def plot_empty_state(figure: Figure, message: str = "Run a valid optimization to display the plot") -> None:
+    figure.clear()
+    axis = figure.add_subplot()
+    axis.set_facecolor(AXES)
+    axis.text(.5, .5, message, color="#94a3b8", ha="center", va="center", wrap=True,
+              transform=axis.transAxes)
+    axis.set_axis_off()
 
 
 def plot_optimization_result(
-    figure: Figure,
-    function: ParsedFunction,
-    result: OptimizationResult,
-) -> None:
-    """Draw the function and the optimization trajectory on a Matplotlib figure."""
+    figure: Figure, result: OptimizationResult, frame: IterationFrame | None = None, *,
+    selected_trial: int | None = None, focus: bool = False, view: Limits | None = None,
+) -> Axes:
+    """Draw the recorded path and the selected transition, on a local slice if needed."""
 
-    figure.clear()
-    figure.patch.set_facecolor("#111827")
-    points = np.asarray([step.point for step in result.steps], dtype=float)
-    if function.dimension == 1:
-        _plot_one_dimensional(figure, function, result, points)
+    frame = frame or iteration_history(result)[0]
+    if figure.axes:
+        axis = figure.axes[0]
+        axis.clear()
     else:
-        _plot_two_dimensional_slice(figure, function, result, points)
-    figure.tight_layout(pad=1.2)
+        axis = figure.add_subplot()
+    axis.set_axis_on()
+    figure.subplots_adjust(left=.17, right=.96, bottom=subplot_bottom(figure), top=.90)
+    one_dimensional = result.function.dimension == 1
+    steps = tuple(_plot_point(step.point, step.value, one_dimensional) for step in result.steps)
+    current = _plot_point(frame.current.point, frame.current.value, one_dimensional)
+    following = (_plot_point(frame.following.point, frame.following.value, one_dimensional)
+                 if frame.following else None)
+    trial = None
+    if selected_trial is not None:
+        sample = frame.trial_points[selected_trial]
+        trial = _plot_point(sample.point, sample.value, one_dimensional)
+    elif frame.failure and frame.second_order and frame.second_order.candidate is not None:
+        failed = frame.second_order
+        trial = _plot_point(failed.candidate, failed.candidate_value, one_dimensional)
+    local = tuple(p for p in (current, following, trial) if p is not None)
+    anchors = (*steps, *local) if not focus else local
+    xlim, ylim = view or tuple(plot_bounds(column, padding=.24) for column in zip(*anchors))
 
-
-def _plot_one_dimensional(
-    figure: Figure,
-    function: ParsedFunction,
-    result: OptimizationResult,
-    points: np.ndarray,
-) -> None:
-    axis = figure.add_subplot(111)
-    axis.set_facecolor("#0f172a")
-    values = points[:, 0]
-    spread = max(float(np.ptp(values)), 1.0)
-    lower = float(np.min(values) - 0.25 * spread - 0.5)
-    upper = float(np.max(values) + 0.25 * spread + 0.5)
-    grid = np.linspace(lower, upper, 500)
-    function_values = np.asarray(
-        [_safe_value(function, (value,)) for value in grid], dtype=float
-    )
-    axis.plot(grid, function_values, color="#60a5fa", linewidth=2.0, label="f(x)")
-    point_values = np.asarray([step.value for step in result.steps], dtype=float)
-    axis.plot(values, point_values, color="#f59e0b", linewidth=1.5, alpha=0.85)
-    axis.scatter(values, point_values, color="#f97316", edgecolors="#fff7ed", zorder=4)
-    for index, (x_value, y_value) in enumerate(zip(values, point_values)):
-        axis.annotate(str(index), (x_value, y_value), color="#f8fafc", fontsize=8, xytext=(4, 4), textcoords="offset points")
-    _style_axis(axis, function.variable_names[0], "f(x)")
-    axis.set_title(f"{result.method.label} trajectory", color="#f8fafc")
-    axis.legend(facecolor="#172033", edgecolor="#334155", labelcolor="#f8fafc")
-
-
-def _plot_two_dimensional_slice(
-    figure: Figure,
-    function: ParsedFunction,
-    result: OptimizationResult,
-    points: np.ndarray,
-) -> None:
-    axis = figure.add_subplot(111)
-    axis.set_facecolor("#0f172a")
-    x_values = points[:, 0]
-    y_values = points[:, 1]
-    x_spread = max(float(np.ptp(x_values)), 1.0)
-    y_spread = max(float(np.ptp(y_values)), 1.0)
-    x_lower = float(np.min(x_values) - 0.35 * x_spread - 0.5)
-    x_upper = float(np.max(x_values) + 0.35 * x_spread + 0.5)
-    y_lower = float(np.min(y_values) - 0.35 * y_spread - 0.5)
-    y_upper = float(np.max(y_values) + 0.35 * y_spread + 0.5)
-    x_grid = np.linspace(x_lower, x_upper, 110)
-    y_grid = np.linspace(y_lower, y_upper, 110)
-    mesh_x, mesh_y = np.meshgrid(x_grid, y_grid)
-    fixed_values = points[0, 2:]
-    surface_values = np.empty_like(mesh_x, dtype=float)
-    for row in range(mesh_x.shape[0]):
-        for column in range(mesh_x.shape[1]):
-            point = (mesh_x[row, column], mesh_y[row, column], *fixed_values)
-            surface_values[row, column] = _safe_value(function, point)
-
-    finite_values = surface_values[np.isfinite(surface_values)]
-    if finite_values.size:
-        minimum = float(np.min(finite_values))
-        upper_percentile = float(np.percentile(finite_values, 92))
-        maximum = max(upper_percentile, minimum + 1e-9)
-        levels = np.linspace(minimum, maximum, 24)
-        axis.contourf(mesh_x, mesh_y, np.clip(surface_values, minimum, maximum), levels=levels, cmap="viridis", alpha=0.85)
-        contours = axis.contour(mesh_x, mesh_y, np.clip(surface_values, minimum, maximum), levels=levels[::4], colors="#dbeafe", linewidths=0.35, alpha=0.5)
-        axis.clabel(contours, inline=True, fontsize=7, fmt="%.2g", colors="#dbeafe")
+    function = result.function
+    x = np.linspace(*xlim, 240 if one_dimensional else 91)
+    if one_dimensional:
+        y = function.evaluate_grid(x)
+        y = np.where(np.abs(y) < PLOT_LIMIT, y, np.nan)
+        axis.plot(x, y, color="#60a5fa", linewidth=1.5, label="f(x)")
+        if view is None:
+            # Use the ordinate range of the plot as well as the recorded points.
+            ordinate = y[np.isfinite(y) & (np.abs(y) < PLOT_LIMIT)]
+            if ordinate.size:
+                ylim = plot_bounds((*[p[1] for p in anchors], *np.percentile(ordinate, (2, 96))), padding=.10)
+        style_axis(axis, function.variable_names[0], "f(x)")
     else:
-        axis.text(0.5, 0.5, "Function could not be evaluated on the plot grid", transform=axis.transAxes, color="#fca5a5", ha="center", va="center")
+        y = np.linspace(*ylim, 91)
+        grid_x, grid_y = np.meshgrid(x, y)
+        draw_contours(axis, grid_x, grid_y, function.evaluate_grid(grid_x, grid_y, *frame.current.point[2:]))
+        style_axis(axis, *function.variable_names[:2])
+    axis.set(xlim=xlim, ylim=ylim)
+    axis.set_title("Trajectory" if function.dimension <= 2 else "2D slice at xₖ · higher coordinates fixed",
+                   color=CURRENT, fontsize=9)
+    if not focus and len(steps) <= 25:
+        for index, point in enumerate(steps):
+            if index != frame.current.iteration and (frame.following is None or index != frame.following.iteration):
+                axis.annotate(str(index), point, xytext=(4, 4), textcoords="offset points",
+                              color="#cbd5e1", fontsize=7, zorder=5, annotation_clip=True)
+    outline_trial = result.method is OptimizationMethod.GRADIENT_HALVING
+    _plot_path(axis, steps, result.convergence_iteration, frame, current, following, trial, outline_trial)
+    if one_dimensional and trial is not None and np.isfinite(trial[0]) and not np.isfinite(trial[1]):
+        axis.axvline(trial[0], color=TRIAL, linestyle=":", linewidth=1.1, label="Invalid trial value")
+    if frame.direction:
+        _draw_direction(axis, current, frame.direction, one_dimensional, xlim, ylim)
+    style_legend(axis)
+    return axis
 
-    axis.plot(x_values, y_values, color="#f59e0b", linewidth=2.0, marker="o", markersize=4, label="iteration path")
-    axis.scatter([x_values[0]], [y_values[0]], color="#22c55e", edgecolors="#f0fdf4", s=60, zorder=5, label="start")
-    axis.scatter([x_values[-1]], [y_values[-1]], color="#ef4444", edgecolors="#fef2f2", s=60, zorder=5, label="result")
-    if len(points) <= 25:
-        for index, (x_value, y_value) in enumerate(zip(x_values, y_values)):
-            axis.annotate(str(index), (x_value, y_value), color="#f8fafc", fontsize=8, xytext=(4, 4), textcoords="offset points")
-    _style_axis(axis, function.variable_names[0], function.variable_names[1])
-    fixed_text = ""
-    if function.dimension > 2:
-        fixed_text = " (2D slice; remaining variables fixed at x₀)"
-    axis.set_title(f"{result.method.label} trajectory{fixed_text}", color="#f8fafc", fontsize=10)
-    axis.legend(facecolor="#172033", edgecolor="#334155", labelcolor="#f8fafc", fontsize=8)
+
+def _plot_point(point, value, one_dimensional):
+    pair = (point[0], value) if one_dimensional else point[:2]
+    return tuple(float(x) if x is not None and isfinite(x) and abs(x) < PLOT_LIMIT else np.nan for x in pair)
 
 
-def _safe_value(function: ParsedFunction, point: tuple[float, ...]) -> float:
-    try:
-        return function.evaluate(point)
-    except (ValueError, OverflowError, FloatingPointError):
-        return float("nan")
+def _plot_path(axis, steps, convergence, frame, current, following, trial, outline_trial) -> None:
+    x, y = np.array(steps).T
+    line, = axis.plot(x, y, color=PATH, linewidth=1.05, alpha=.58, marker="o", markersize=3,
+                      label="iteration path", picker=5, zorder=4)
+    line.set_gid("iterations")
+    if convergence is not None:
+        axis.scatter(*steps[convergence], marker="D", facecolors="none", edgecolors=CONVERGENCE,
+                     s=130, linewidths=1.4, label="Convergence reached", zorder=5)
+    axis.scatter(*current, s=58, facecolors=AXES, edgecolors=CURRENT, linewidths=1.5, zorder=7, label="xₖ")
+    axis.annotate(f"{frame.current.iteration}", current, xytext=(-7, 8), textcoords="offset points",
+                  color=CURRENT, ha="right", fontsize=8, zorder=9, annotation_clip=True)
+    if following is not None:
+        start, end = np.array(current), np.array(following)
+        if np.all(np.isfinite([start, end])) and np.any(start != end):
+            direction = end - start
+            axis.quiver(*start, *direction, color=NEXT, angles="xy", scale_units="xy", scale=1,
+                        width=.007, zorder=6)
+        axis.scatter(*following, c=NEXT, edgecolors=AXES, s=55, label="xₖ₊₁", zorder=8)
+        axis.annotate(f"{frame.following.iteration}", following, xytext=(7, -11), textcoords="offset points",
+                      color=NEXT, fontsize=8, zorder=9, annotation_clip=True)
+    if trial is not None and np.all(np.isfinite(trial)):
+        if outline_trial:
+            axis.scatter(*trial, facecolors="none", edgecolors=TRIAL, s=111, marker="s",
+                         linewidths=1.6, label="Selected trial", zorder=9)
+        elif trial not in (current, following):
+            axis.scatter(*trial, c=TRIAL, edgecolors=AXES, s=55, marker="s", label="Selected trial", zorder=8)
 
 
-def _style_axis(axis, x_label: str, y_label: str) -> None:
-    axis.set_xlabel(x_label, color="#cbd5e1")
-    axis.set_ylabel(y_label, color="#cbd5e1")
-    axis.tick_params(colors="#cbd5e1")
+def _draw_direction(axis, current, direction, one_dimensional, xlim, ylim) -> None:
+    projected = np.array((direction[0], 0.) if one_dimensional else direction[:2])
+    scale = np.max(np.abs(projected))
+    if not scale or not np.all(np.isfinite(current)):
+        return
+    spans = (xlim[1] - xlim[0], ylim[1] - ylim[0])
+    local_span = spans[0] if one_dimensional else min(spans)
+    projected = projected / scale
+    end = np.asarray(current) + .22 * local_span * projected / np.linalg.norm(projected)
+    axis.annotate("", end, xytext=current,
+                  arrowprops={"arrowstyle": "->", "color": DIRECTION, "linestyle": "--", "linewidth": 1.2},
+                  zorder=6)
+    axis.plot([], [], "--", color=DIRECTION, label="Direction (scaled)")
+
+
+def plot_bounds(values, *, padding: float = .12) -> tuple[float, float]:
+    finite = [float(x) for x in values if isfinite(x) and abs(x) < PLOT_LIMIT]
+    if not finite:
+        return -1., 1.
+    low, high = min(finite), max(finite)
+    scale = max(abs(low), abs(high), 1.)
+    span = high - low
+    margin = padding * max(span, 1e-10 * scale) if span else .2 * scale
+    return low - margin, high + margin
+
+
+def draw_contours(axis: Axes, mesh_x, mesh_y, values) -> None:
+    finite = values[np.isfinite(values) & (np.abs(values) < PLOT_LIMIT)]
+    if not finite.size:
+        axis.text(.5, .5, "Function undefined on this view", transform=axis.transAxes,
+                  color="#fca5a5", ha="center", va="center")
+        return
+    low, high = np.percentile(finite, (0, 97))
+    if high == low:
+        high = np.max(finite)
+    levels = np.linspace(low, high, 23)
+    masked = np.ma.masked_invalid(np.clip(values, low, high))
+    if not np.all(np.diff(levels) > 0):
+        axis.pcolormesh(mesh_x, mesh_y, masked, cmap="viridis", alpha=.35, shading="auto")
+        return
+    axis.contourf(mesh_x, mesh_y, masked, levels=levels, cmap="viridis", alpha=.68)
+    axis.contour(mesh_x, mesh_y, masked, levels=levels[::4],
+                 colors="#e2e8f0", linewidths=.4, alpha=.45)
+
+
+def style_axis(axis: Axes, x_label: str, y_label: str) -> None:
+    axis.set_facecolor(AXES)
+    axis.set_xlabel(x_label, color="#cbd5e1", fontsize=9, labelpad=2)
+    axis.set_ylabel(y_label, color="#cbd5e1", fontsize=9)
+    axis.tick_params(colors="#cbd5e1", labelsize=8, pad=2)
+    axis.xaxis.get_offset_text().set_color("#cbd5e1")
+    axis.yaxis.get_offset_text().set_color("#cbd5e1")
     for spine in axis.spines.values():
         spine.set_color("#475569")
-    axis.grid(color="#475569", alpha=0.25, linewidth=0.6)
+    axis.grid(color="#94a3b8", alpha=.17, linewidth=.6)
+
+
+def style_legend(axis: Axes, *, columns: int = 2) -> None:
+    if not axis.get_legend_handles_labels()[0]:
+        return
+    axis.legend(facecolor="#172033", edgecolor="#334155", labelcolor="#e2e8f0",
+                fontsize=7, loc="best", ncol=columns, columnspacing=.9, handlelength=1.3)
